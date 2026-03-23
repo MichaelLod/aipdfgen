@@ -276,25 +276,29 @@ function buildAnthropicRequest(
   messages: Message[],
   config: ProviderConfig,
 ): [string, RequestInit] {
-  const apiMessages = messages.map((m) => {
-    if (m.role === 'user' && m.images?.length && config.supportsVision) {
-      return {
-        role: 'user' as const,
-        content: [
-          ...m.images.map((img) => ({
-            type: 'image' as const,
-            source: {
-              type: 'base64' as const,
-              media_type: img.mimeType,
-              data: img.dataUrl.split(',')[1],
-            },
-          })),
-          { type: 'text' as const, text: m.content },
-        ],
-      };
-    }
-    return { role: m.role, content: m.content };
-  });
+  const apiMessages: ReturnType<typeof messages.map> = [
+    { role: 'user' as const, content: systemPrompt },
+    { role: 'assistant' as const, content: 'Understood. I will follow these instructions.' },
+    ...messages.map((m) => {
+      if (m.role === 'user' && m.images?.length && config.supportsVision) {
+        return {
+          role: 'user' as const,
+          content: [
+            ...m.images.map((img) => ({
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: img.mimeType,
+                data: img.dataUrl.split(',')[1],
+              },
+            })),
+            { type: 'text' as const, text: m.content },
+          ],
+        };
+      }
+      return { role: m.role, content: m.content };
+    }),
+  ];
 
   return [
     config.url,
@@ -304,7 +308,6 @@ function buildAnthropicRequest(
       body: JSON.stringify({
         model: config.model,
         max_tokens: 8192,
-        system: systemPrompt,
         messages: apiMessages,
         stream: true,
       }),
