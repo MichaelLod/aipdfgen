@@ -30,6 +30,7 @@ export const metadata: Metadata = {
     'ai letter writer',
     'byoky',
   ],
+  icons: { icon: '/icon.svg', apple: '/icon.svg' },
   metadataBase: new URL('https://rnrh.app'),
   alternates: { canonical: '/' },
   openGraph: {

@@ -1,6 +1,10 @@
-# Free AI PDF Generator
+<p align="center">
+  <img src="public/icon.svg" width="80" height="80" alt="Free AI PDF Generator icon">
+</p>
 
-Create any PDF with AI — invoices, resumes, certificates, reports, letters, and more. Uses your own API keys so there are no server costs, no limits, and no account needed.
+<h1 align="center">Free AI PDF Generator</h1>
+
+<p align="center">Create any PDF with AI — invoices, resumes, certificates, reports, letters, and more.<br>Uses your own API keys so there are no server costs, no limits, and no account needed.</p>
 
 **Live:** [rnrh.app](https://rnrh.app)
 

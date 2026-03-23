@@ -271,42 +271,34 @@ function geminiDelta(data: string): string | null {
 
 // ─── Request Builders ────────────────────────────────────────────────────────
 
+function textOnlyMessages(messages: Message[]): { role: string; content: string }[] {
+  return messages.map((m) => {
+    let text = m.content;
+    if (m.role === 'user' && m.images?.length) {
+      const names = m.images.map((img) => img.name).join(', ');
+      text = `[Uploaded images: ${names}]\n\n${text}`;
+    }
+    return { role: m.role, content: text };
+  });
+}
+
 function buildAnthropicRequest(
   systemPrompt: string,
   messages: Message[],
-  config: ProviderConfig,
 ): [string, RequestInit] {
-  const apiMessages: ReturnType<typeof messages.map> = [
+  const apiMessages = [
     { role: 'user' as const, content: systemPrompt },
     { role: 'assistant' as const, content: 'Understood. I will follow these instructions.' },
-    ...messages.map((m) => {
-      if (m.role === 'user' && m.images?.length && config.supportsVision) {
-        return {
-          role: 'user' as const,
-          content: [
-            ...m.images.map((img) => ({
-              type: 'image' as const,
-              source: {
-                type: 'base64' as const,
-                media_type: img.mimeType,
-                data: img.dataUrl.split(',')[1],
-              },
-            })),
-            { type: 'text' as const, text: m.content },
-          ],
-        };
-      }
-      return { role: m.role, content: m.content };
-    }),
+    ...textOnlyMessages(messages),
   ];
 
   return [
-    config.url,
+    'https://api.anthropic.com/v1/messages',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: config.model,
+        model: 'claude-sonnet-4-20250514',
         max_tokens: 8192,
         messages: apiMessages,
         stream: true,
@@ -320,24 +312,9 @@ function buildOpenAIRequest(
   messages: Message[],
   config: ProviderConfig,
 ): [string, RequestInit] {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const apiMessages: any[] = [
+  const apiMessages = [
     { role: 'system', content: systemPrompt },
-    ...messages.map((m) => {
-      if (m.role === 'user' && m.images?.length && config.supportsVision) {
-        return {
-          role: 'user',
-          content: [
-            ...m.images.map((img) => ({
-              type: 'image_url',
-              image_url: { url: img.dataUrl },
-            })),
-            { type: 'text', text: m.content },
-          ],
-        };
-      }
-      return { role: m.role, content: m.content };
-    }),
+    ...textOnlyMessages(messages),
   ];
 
   return [
@@ -353,22 +330,14 @@ function buildOpenAIRequest(
 function buildGeminiRequest(
   systemPrompt: string,
   messages: Message[],
-  config: ProviderConfig,
 ): [string, RequestInit] {
-  const contents = messages.map((m) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parts: any[] = [];
-    if (m.role === 'user' && m.images?.length && config.supportsVision) {
-      m.images.forEach((img) => {
-        parts.push({ inlineData: { mimeType: img.mimeType, data: img.dataUrl.split(',')[1] } });
-      });
-    }
-    parts.push({ text: m.content });
-    return { role: m.role === 'assistant' ? 'model' : 'user', parts };
-  });
+  const contents = textOnlyMessages(messages).map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
 
   return [
-    config.streamUrl || config.url,
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -603,10 +572,10 @@ export default function PDFApp() {
       let extractor: (data: string) => string | null;
 
       if (provider.type === 'anthropic') {
-        [url, init] = buildAnthropicRequest(systemPrompt, newMessages, provider);
+        [url, init] = buildAnthropicRequest(systemPrompt, newMessages);
         extractor = anthropicDelta;
       } else if (provider.type === 'gemini') {
-        [url, init] = buildGeminiRequest(systemPrompt, newMessages, provider);
+        [url, init] = buildGeminiRequest(systemPrompt, newMessages);
         extractor = geminiDelta;
       } else {
         [url, init] = buildOpenAIRequest(systemPrompt, newMessages, provider);
@@ -692,12 +661,14 @@ export default function PDFApp() {
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="max-w-md w-full">
             <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-2xl mb-4">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <path d="M12 18v-6" />
-                  <path d="M9 15l3-3 3 3" />
+              <div className="inline-flex items-center justify-center w-16 h-16 mb-4">
+                <svg width="64" height="64" viewBox="0 0 512 512" fill="none">
+                  <rect width="512" height="512" rx="108" fill="#4f46e5"/>
+                  <path d="M148 80h136l80 80v272a24 24 0 0 1-24 24H148a24 24 0 0 1-24-24V104a24 24 0 0 1 24-24z" fill="white" opacity="0.95"/>
+                  <path d="M284 80v56a24 24 0 0 0 24 24h56z" fill="white" opacity="0.6"/>
+                  <polygon points="390,200 400,230 430,240 400,250 390,280 380,250 350,240 380,230" fill="white"/>
+                  <polygon points="420,300 426,316 442,322 426,328 420,344 414,328 398,322 414,316" fill="white" opacity="0.8"/>
+                  <polygon points="370,150 374,160 384,164 374,168 370,178 366,168 356,164 366,160" fill="white" opacity="0.7"/>
                 </svg>
               </div>
               <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Free AI PDF Generator</h1>
@@ -768,9 +739,13 @@ export default function PDFApp() {
       {/* Header */}
       <header className="h-14 border-b border-gray-200 flex items-center px-4 shrink-0 gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
+          <svg width="22" height="22" viewBox="0 0 512 512" fill="none" className="shrink-0">
+            <rect width="512" height="512" rx="108" fill="#4f46e5"/>
+            <path d="M148 80h136l80 80v272a24 24 0 0 1-24 24H148a24 24 0 0 1-24-24V104a24 24 0 0 1 24-24z" fill="white" opacity="0.95"/>
+            <path d="M284 80v56a24 24 0 0 0 24 24h56z" fill="white" opacity="0.6"/>
+            <polygon points="390,200 400,230 430,240 400,250 390,280 380,250 350,240 380,230" fill="white"/>
+            <polygon points="420,300 426,316 442,322 426,328 420,344 414,328 398,322 414,316" fill="white" opacity="0.8"/>
+            <polygon points="370,150 374,160 384,164 374,168 370,178 366,168 356,164 366,160" fill="white" opacity="0.7"/>
           </svg>
           <span className="font-semibold text-gray-900 truncate hidden sm:inline">Free AI PDF Generator</span>
         </div>
