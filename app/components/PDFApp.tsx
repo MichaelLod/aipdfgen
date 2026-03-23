@@ -18,6 +18,27 @@ interface Message {
   images?: UploadedImage[];
 }
 
+interface PageSettings {
+  size: 'a4' | 'letter' | 'legal';
+  orientation: 'portrait' | 'landscape';
+  margin: 'none' | 'narrow' | 'normal' | 'wide';
+}
+
+const PAGE_SIZES = {
+  a4: { w: 210, h: 297, label: 'A4' },
+  letter: { w: 215.9, h: 279.4, label: 'Letter' },
+  legal: { w: 215.9, h: 355.6, label: 'Legal' },
+};
+
+const MARGINS = {
+  none: { mm: 0, px: 0, label: 'None' },
+  narrow: { mm: 10, px: 38, label: 'Narrow' },
+  normal: { mm: 20, px: 75, label: 'Normal' },
+  wide: { mm: 30, px: 113, label: 'Wide' },
+};
+
+const DEFAULT_PAGE: PageSettings = { size: 'a4', orientation: 'portrait', margin: 'normal' };
+
 type ProviderType = 'anthropic' | 'openai' | 'gemini';
 
 interface ProviderConfig {
@@ -167,8 +188,8 @@ OUTPUT RULES:
 
 DESIGN RULES:
 - Use a <style> tag in <head> for all CSS.
-- Design for A4 paper: @page { size: A4; margin: 20mm; }
-- Body: white background, color #1a1a1a.
+- IMPORTANT: Set body padding to create page margins: body { padding: 60px 50px; } (this simulates print margins).
+- Body: white background, color #1a1a1a, box-sizing border-box.
 - Professional fonts: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif for modern docs; Georgia, 'Times New Roman', serif for formal docs.
 - Body text: 11-12pt, line-height 1.6.
 - Headings: clear hierarchy with proportional sizes.
@@ -361,13 +382,22 @@ function extractNonStreaming(type: ProviderType, data: string): string {
 
 // ─── PDF Download ────────────────────────────────────────────────────────────
 
-async function downloadPdf(htmlStr: string, setDownloading?: (v: boolean) => void) {
+async function downloadPdf(htmlStr: string, page: PageSettings, setDownloading?: (v: boolean) => void) {
   setDownloading?.(true);
   try {
     const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
       import('jspdf'),
       import('html2canvas'),
     ]);
+
+    const sizeInfo = PAGE_SIZES[page.size];
+    const marginInfo = MARGINS[page.margin];
+    const isLandscape = page.orientation === 'landscape';
+    const pw = isLandscape ? sizeInfo.h : sizeInfo.w;
+    const ph = isLandscape ? sizeInfo.w : sizeInfo.h;
+
+    // Calculate pixel width for capture (96dpi)
+    const captureWidthPx = Math.round((pw / 25.4) * 96);
 
     // Parse HTML to separate styles and body content
     const parser = new DOMParser();
@@ -380,9 +410,15 @@ async function downloadPdf(htmlStr: string, setDownloading?: (v: boolean) => voi
     container.style.position = 'absolute';
     container.style.left = '0';
     container.style.top = window.scrollY + 'px';
-    container.style.width = '794px';
+    container.style.width = captureWidthPx + 'px';
     container.style.background = 'white';
     container.style.zIndex = '99999';
+    container.style.boxSizing = 'border-box';
+
+    // Apply margin as padding if the HTML doesn't already have padding
+    if (marginInfo.px > 0) {
+      container.style.padding = marginInfo.px + 'px';
+    }
 
     // Copy styles — rewrite body/html selectors to target our container
     doc.head.querySelectorAll('style').forEach((el) => {
@@ -421,17 +457,15 @@ async function downloadPdf(htmlStr: string, setDownloading?: (v: boolean) => voi
     const canvas = await html2canvas(container, {
       scale: 3,
       useCORS: true,
-      width: 794,
-      windowWidth: 794,
+      width: captureWidthPx,
+      windowWidth: captureWidthPx,
       backgroundColor: '#ffffff',
     });
 
     document.body.removeChild(container);
 
     // Build multi-page PDF
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const pw = 210;
-    const ph = 297;
+    const pdf = new jsPDF({ orientation: page.orientation, unit: 'mm', format: page.size });
     const imgW = pw;
     const imgH = (canvas.height * pw) / canvas.width;
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
@@ -482,6 +516,8 @@ export default function PDFApp() {
   const [generating, setGenerating] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'preview'>('chat');
+  const [pageSettings, setPageSettings] = useState<PageSettings>(DEFAULT_PAGE);
+  const [showPageSettings, setShowPageSettings] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -698,7 +734,7 @@ export default function PDFApp() {
   }
 
   function handleDownload() {
-    if (html) downloadPdf(html, setDownloading);
+    if (html) downloadPdf(html, pageSettings, setDownloading);
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────
@@ -1003,13 +1039,23 @@ export default function PDFApp() {
         {/* Right: Preview */}
         <div className={`flex-1 flex-col bg-gray-50 ${activeTab !== 'preview' ? 'hidden md:flex' : 'flex'}`}>
           {/* Preview header */}
-          <div className="h-11 border-b border-gray-200 flex items-center px-4 bg-white shrink-0">
+          <div className="border-b border-gray-200 flex items-center px-4 py-2 bg-white shrink-0 gap-2 flex-wrap">
             <span className="text-sm text-gray-400">Preview</span>
-            <div className="ml-auto flex items-center gap-2">
+
+            {/* Page settings */}
+            <div className="ml-auto flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => {
-                  if (html) navigator.clipboard.writeText(html);
-                }}
+                onClick={() => setShowPageSettings(!showPageSettings)}
+                className="text-xs px-2.5 py-1 rounded-md text-gray-500 hover:bg-gray-100 transition cursor-pointer flex items-center gap-1"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+                {PAGE_SIZES[pageSettings.size].label} · {pageSettings.orientation === 'portrait' ? 'Portrait' : 'Landscape'} · {MARGINS[pageSettings.margin].label}
+              </button>
+              <button
+                onClick={() => { if (html) navigator.clipboard.writeText(html); }}
                 disabled={!html}
                 className="text-xs px-2.5 py-1 rounded-md text-gray-500 hover:bg-gray-100 transition disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
               >
@@ -1025,7 +1071,7 @@ export default function PDFApp() {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
                       <circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" />
                     </svg>
-                    Generating PDF...
+                    Generating...
                   </>
                 ) : (
                   <>
@@ -1040,6 +1086,48 @@ export default function PDFApp() {
               </button>
             </div>
           </div>
+
+          {/* Page settings panel */}
+          {showPageSettings && (
+            <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 flex items-center gap-4 flex-wrap text-xs shrink-0">
+              <label className="flex items-center gap-1.5 text-gray-600">
+                Size
+                <select
+                  value={pageSettings.size}
+                  onChange={(e) => setPageSettings({ ...pageSettings, size: e.target.value as PageSettings['size'] })}
+                  className="border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand/30"
+                >
+                  <option value="a4">A4</option>
+                  <option value="letter">Letter</option>
+                  <option value="legal">Legal</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5 text-gray-600">
+                Orientation
+                <select
+                  value={pageSettings.orientation}
+                  onChange={(e) => setPageSettings({ ...pageSettings, orientation: e.target.value as PageSettings['orientation'] })}
+                  className="border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand/30"
+                >
+                  <option value="portrait">Portrait</option>
+                  <option value="landscape">Landscape</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5 text-gray-600">
+                Margins
+                <select
+                  value={pageSettings.margin}
+                  onChange={(e) => setPageSettings({ ...pageSettings, margin: e.target.value as PageSettings['margin'] })}
+                  className="border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand/30"
+                >
+                  <option value="none">None</option>
+                  <option value="narrow">Narrow (10mm)</option>
+                  <option value="normal">Normal (20mm)</option>
+                  <option value="wide">Wide (30mm)</option>
+                </select>
+              </label>
+            </div>
+          )}
 
           {/* Preview content */}
           <div className="flex-1 overflow-auto p-4 md:p-6 flex justify-center items-start">
