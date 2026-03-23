@@ -39,10 +39,20 @@ export default function Page() {
               Unlike other AI PDF tools that charge subscriptions, this generator uses your own AI API keys through <a href="https://github.com/MichaelLod/byoky" className="text-indigo-600 hover:underline">Byoky</a> (an open-source AI key wallet). Everything runs in your browser — no data sent to our servers, no hidden costs, no limits.
             </p>
           </div>
-          <div className="mt-12 pt-6 border-t border-gray-200 flex flex-wrap items-center gap-4 text-sm text-gray-400">
+          <div className="mt-10 pt-8 border-t border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Open Source</h3>
+            <p className="text-sm text-gray-600">
+              This project is fully open source under the <strong>MIT License</strong>. Check out the code, open issues, or submit a pull request on{' '}
+              <a href="https://github.com/MichaelLod/aipdfgen" className="text-indigo-600 hover:underline font-medium">GitHub</a>.
+              Contributions are welcome — whether it&apos;s new features, bug fixes, or documentation improvements.
+            </p>
+          </div>
+          <div className="mt-8 pt-6 border-t border-gray-200 flex flex-wrap items-center gap-4 text-sm text-gray-400">
             <span>Powered by <a href="https://github.com/MichaelLod/byoky" className="text-gray-500 hover:underline">Byoky</a></span>
             <span>&middot;</span>
-            <a href="https://github.com/MichaelLod/aipdfgen" className="text-gray-500 hover:underline">Open Source on GitHub</a>
+            <a href="https://github.com/MichaelLod/aipdfgen" className="text-gray-500 hover:underline">GitHub</a>
+            <span>&middot;</span>
+            <span>MIT License</span>
           </div>
         </div>
       </footer>

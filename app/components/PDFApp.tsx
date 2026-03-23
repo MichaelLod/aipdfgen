@@ -361,69 +361,98 @@ function extractNonStreaming(type: ProviderType, data: string): string {
 
 // ─── PDF Download ────────────────────────────────────────────────────────────
 
-async function downloadPdf(html: string, setDownloading?: (v: boolean) => void) {
+async function downloadPdf(htmlStr: string, setDownloading?: (v: boolean) => void) {
   setDownloading?.(true);
   try {
-    const html2pdf = (await import('html2pdf.js')).default;
+    const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+      import('jspdf'),
+      import('html2canvas'),
+    ]);
 
-    // Use an iframe so the HTML renders in its own document context
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.left = '0';
-    iframe.style.top = '0';
-    iframe.style.width = '794px';
-    iframe.style.height = '1123px';
-    iframe.style.opacity = '0';
-    iframe.style.pointerEvents = 'none';
-    iframe.style.zIndex = '-1';
-    document.body.appendChild(iframe);
+    // Parse HTML to separate styles and body content
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlStr, 'text/html');
+    const containerId = 'pdf-capture-' + Date.now();
 
-    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!iframeDoc) throw new Error('Cannot access iframe');
+    // Build a visible container in the main document
+    const container = document.createElement('div');
+    container.id = containerId;
+    container.style.position = 'absolute';
+    container.style.left = '0';
+    container.style.top = window.scrollY + 'px';
+    container.style.width = '794px';
+    container.style.background = 'white';
+    container.style.zIndex = '99999';
 
-    iframeDoc.open();
-    iframeDoc.write(html);
-    iframeDoc.close();
-
-    // Wait for content + images to load
-    await new Promise<void>((resolve) => {
-      const imgs = iframeDoc.querySelectorAll('img');
-      if (imgs.length === 0) {
-        setTimeout(resolve, 200);
-        return;
-      }
-      let loaded = 0;
-      const check = () => { if (++loaded >= imgs.length) setTimeout(resolve, 100); };
-      imgs.forEach((img) => {
-        if (img.complete) check();
-        else { img.onload = check; img.onerror = check; }
-      });
-      setTimeout(resolve, 3000);
+    // Copy styles — rewrite body/html selectors to target our container
+    doc.head.querySelectorAll('style').forEach((el) => {
+      const s = document.createElement('style');
+      let css = el.textContent || '';
+      css = css.replace(/\bhtml\s*\{/g, `#${containerId} {`);
+      css = css.replace(/\bbody\s*\{/g, `#${containerId} {`);
+      s.textContent = css;
+      container.appendChild(s);
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (html2pdf as any)()
-      .set({
-        margin: 0,
-        filename: 'document.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          letterRendering: true,
-          scrollY: 0,
-          windowWidth: 794,
-          width: 794,
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['css', 'legacy'] },
-      })
-      .from(iframeDoc.body)
-      .save();
+    // Copy body content
+    const inner = document.createElement('div');
+    inner.innerHTML = doc.body.innerHTML;
+    const bodyStyle = doc.body.getAttribute('style');
+    if (bodyStyle) inner.setAttribute('style', bodyStyle);
+    container.appendChild(inner);
 
-    document.body.removeChild(iframe);
-  } catch {
-    const blob = new Blob([html], { type: 'text/html' });
+    document.body.appendChild(container);
+
+    // Wait for images + fonts to render
+    const imgs = container.querySelectorAll('img');
+    if (imgs.length > 0) {
+      await Promise.race([
+        Promise.all(
+          Array.from(imgs).map(
+            (img) => img.complete ? Promise.resolve() : new Promise<void>((r) => { img.onload = () => r(); img.onerror = () => r(); }),
+          ),
+        ),
+        new Promise((r) => setTimeout(r, 4000)),
+      ]);
+    }
+    await new Promise((r) => setTimeout(r, 300));
+
+    // High-res capture
+    const canvas = await html2canvas(container, {
+      scale: 3,
+      useCORS: true,
+      width: 794,
+      windowWidth: 794,
+      backgroundColor: '#ffffff',
+    });
+
+    document.body.removeChild(container);
+
+    // Build multi-page PDF
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pw = 210;
+    const ph = 297;
+    const imgW = pw;
+    const imgH = (canvas.height * pw) / canvas.width;
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+    let remaining = imgH;
+    let yOffset = 0;
+
+    pdf.addImage(imgData, 'JPEG', 0, yOffset, imgW, imgH);
+    remaining -= ph;
+
+    while (remaining > 0) {
+      yOffset -= ph;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, yOffset, imgW, imgH);
+      remaining -= ph;
+    }
+
+    pdf.save('document.pdf');
+  } catch (err) {
+    console.error('PDF generation failed:', err);
+    const blob = new Blob([htmlStr], { type: 'text/html' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'document.html';
