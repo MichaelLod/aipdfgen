@@ -366,14 +366,40 @@ async function downloadPdf(html: string, setDownloading?: (v: boolean) => void) 
   try {
     const html2pdf = (await import('html2pdf.js')).default;
 
-    const container = document.createElement('div');
-    container.innerHTML = html;
-    container.style.width = '794px';
-    container.style.position = 'fixed';
-    container.style.left = '-10000px';
-    container.style.top = '0';
-    container.style.background = 'white';
-    document.body.appendChild(container);
+    // Use an iframe so the HTML renders in its own document context
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '0';
+    iframe.style.top = '0';
+    iframe.style.width = '794px';
+    iframe.style.height = '1123px';
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    iframe.style.zIndex = '-1';
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) throw new Error('Cannot access iframe');
+
+    iframeDoc.open();
+    iframeDoc.write(html);
+    iframeDoc.close();
+
+    // Wait for content + images to load
+    await new Promise<void>((resolve) => {
+      const imgs = iframeDoc.querySelectorAll('img');
+      if (imgs.length === 0) {
+        setTimeout(resolve, 200);
+        return;
+      }
+      let loaded = 0;
+      const check = () => { if (++loaded >= imgs.length) setTimeout(resolve, 100); };
+      imgs.forEach((img) => {
+        if (img.complete) check();
+        else { img.onload = check; img.onerror = check; }
+      });
+      setTimeout(resolve, 3000);
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (html2pdf as any)()
@@ -381,14 +407,21 @@ async function downloadPdf(html: string, setDownloading?: (v: boolean) => void) 
         margin: 0,
         filename: 'document.pdf',
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          letterRendering: true,
+          scrollY: 0,
+          windowWidth: 794,
+          width: 794,
+        },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['css', 'legacy'] },
       })
-      .from(container)
+      .from(iframeDoc.body)
       .save();
 
-    document.body.removeChild(container);
+    document.body.removeChild(iframe);
   } catch {
     const blob = new Blob([html], { type: 'text/html' });
     const a = document.createElement('a');
