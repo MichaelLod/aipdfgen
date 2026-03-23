@@ -392,31 +392,44 @@ function extractNonStreaming(type: ProviderType, data: string): string {
 
 // ─── PDF Download ────────────────────────────────────────────────────────────
 
-function downloadPdf(html: string) {
-  let printHtml = html;
-  if (!printHtml.includes('@page')) {
-    const insertion = '<style>@page { size: A4; margin: 20mm; }</style>';
-    if (printHtml.includes('</head>')) {
-      printHtml = printHtml.replace('</head>', insertion + '</head>');
-    } else {
-      printHtml = `<html><head>${insertion}</head><body>${printHtml}</body></html>`;
-    }
-  }
+async function downloadPdf(html: string, setDownloading?: (v: boolean) => void) {
+  setDownloading?.(true);
+  try {
+    const html2pdf = (await import('html2pdf.js')).default;
 
-  const w = window.open('', '_blank');
-  if (!w) {
-    const blob = new Blob([printHtml], { type: 'text/html' });
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    container.style.width = '794px';
+    container.style.position = 'fixed';
+    container.style.left = '-10000px';
+    container.style.top = '0';
+    container.style.background = 'white';
+    document.body.appendChild(container);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (html2pdf as any)()
+      .set({
+        margin: 0,
+        filename: 'document.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] },
+      })
+      .from(container)
+      .save();
+
+    document.body.removeChild(container);
+  } catch {
+    const blob = new Blob([html], { type: 'text/html' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'document.html';
     a.click();
     URL.revokeObjectURL(a.href);
-    return;
+  } finally {
+    setDownloading?.(false);
   }
-
-  w.document.write(printHtml);
-  w.document.close();
-  w.onload = () => setTimeout(() => { w.focus(); w.print(); }, 300);
 }
 
 // ─── Byoky Instance ─────────────────────────────────────────────────────────
@@ -436,6 +449,7 @@ export default function PDFApp() {
   const [allImages, setAllImages] = useState<UploadedImage[]>([]);
   const [html, setHtml] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'preview'>('chat');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -653,7 +667,7 @@ export default function PDFApp() {
   }
 
   function handleDownload() {
-    if (html) downloadPdf(html);
+    if (html) downloadPdf(html, setDownloading);
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────
@@ -966,15 +980,26 @@ export default function PDFApp() {
               </button>
               <button
                 onClick={handleDownload}
-                disabled={!html || generating}
+                disabled={!html || generating || downloading}
                 className="text-xs px-3 py-1.5 rounded-lg bg-brand text-white hover:bg-brand-dark transition disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed flex items-center gap-1.5"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                Save as PDF
+                {downloading ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                      <circle cx="12" cy="12" r="10" strokeDasharray="50" strokeDashoffset="15" />
+                    </svg>
+                    Generating PDF...
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download PDF
+                  </>
+                )}
               </button>
             </div>
           </div>
